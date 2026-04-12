@@ -28,6 +28,7 @@ SMTP_CONFIGS = {
     # QQ邮箱
     "qq.com": {"server": "smtp.qq.com", "port": 465, "ssl": True},
     "foxmail.com": {"server": "smtp.qq.com", "port": 465, "ssl": True},
+    "ems.gold": {"server": "hwsmtp.exmail.qq.com", "port": 465, "ssl": True},
     # 网易邮箱
     "163.com": {"server": "smtp.163.com", "port": 465, "ssl": True},
     "126.com": {"server": "smtp.126.com", "port": 465, "ssl": True},
@@ -44,7 +45,7 @@ SMTP_CONFIGS = {
     # 阿里云
     "aliyun.com": {"server": "smtp.aliyun.com", "port": 465, "ssl": True},
     # 139邮箱
-    "139.com": {"server": "smtp.139.com", "port": 465, "ssl": True},
+    "139.com": {"server": "smtp.139.com", "port": 465, "ssl": True},    
 }
 
 
