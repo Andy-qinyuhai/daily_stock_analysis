@@ -46,6 +46,7 @@ from src.search_service import SearchService
 from src.analysis_context_pack_prompt import format_analysis_context_pack_prompt_section
 from src.analysis_context_pack_overview import render_analysis_context_pack_overview
 from src.market_phase_summary import MARKET_PHASE_SUMMARY_KEY, render_market_phase_summary
+from src.phase_decision_guardrail import apply_phase_decision_guardrails
 from src.services.social_sentiment_service import SocialSentimentService
 from src.services.analysis_context_builder import (
     AnalysisContextBuilder,
@@ -102,6 +103,7 @@ class StockAnalysisPipeline:
         save_context_snapshot: Optional[bool] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         analysis_skills: Optional[List[str]] = None,
+        analysis_phase: str = "auto",
     ):
         """
         初始化调度器
@@ -121,6 +123,7 @@ class StockAnalysisPipeline:
         )
         self.progress_callback = progress_callback
         self.analysis_skills = list(analysis_skills) if analysis_skills is not None else None
+        self.analysis_phase = analysis_phase or "auto"
         
         # 初始化各模块
         self.db = get_db()
@@ -295,7 +298,7 @@ class StockAnalysisPipeline:
                 market=market,
                 current_time=current_time,
                 trigger_source=self.query_source,
-                analysis_intent="auto",
+                analysis_phase=getattr(self, "analysis_phase", "auto"),
             )
             market_phase_context_dict = market_phase_context.to_dict()
             market_phase_summary = render_market_phase_summary(market_phase_context_dict)
@@ -607,6 +610,15 @@ class StockAnalysisPipeline:
             if result:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
+                adjustments = apply_phase_decision_guardrails(
+                    result,
+                    market_phase_summary=market_phase_summary,
+                    analysis_context_pack_overview=analysis_context_pack_overview,
+                    report_language=getattr(result, "report_language", None)
+                    or getattr(self.config, "report_language", "zh"),
+                )
+                if adjustments:
+                    logger.info("[phase_decision_guardrail] Applied adjustments for %s: %s", code, adjustments)
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
 
@@ -1077,7 +1089,10 @@ class StockAnalysisPipeline:
             if result and getattr(self.config, "report_integrity_enabled", False):
                 from src.analyzer import check_content_integrity, apply_placeholder_fill
 
-                pass_integrity, missing = check_content_integrity(result)
+                pass_integrity, missing = check_content_integrity(
+                    result,
+                    require_phase_decision=isinstance(market_phase_summary, dict),
+                )
                 if not pass_integrity:
                     apply_placeholder_fill(result, missing)
                     logger.info(
@@ -1096,6 +1111,15 @@ class StockAnalysisPipeline:
                     result.current_price = realtime_data.get("price")
                     result.change_pct = realtime_data.get("change_pct")
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
+                adjustments = apply_phase_decision_guardrails(
+                    result,
+                    market_phase_summary=market_phase_summary,
+                    analysis_context_pack_overview=analysis_context_pack_overview,
+                    report_language=getattr(result, "report_language", None)
+                    or getattr(self.config, "report_language", "zh"),
+                )
+                if adjustments:
+                    logger.info("[phase_decision_guardrail] Applied agent adjustments for %s: %s", code, adjustments)
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
 
@@ -1325,6 +1349,11 @@ class StockAnalysisPipeline:
                 result.analysis_summary = str(raw_summary)
             else:
                 result.analysis_summary = self._summary_fallback_from_result(result, report_language)
+            top_level_phase_decision = dash.get("phase_decision") if isinstance(dash, dict) else None
+            if isinstance(nested_dashboard, dict) and isinstance(top_level_phase_decision, dict):
+                nested_dashboard = dict(nested_dashboard)
+                nested_dashboard.setdefault("phase_decision", top_level_phase_decision)
+
             # The AI returns a top-level dict that contains a nested 'dashboard' sub-key
             # with core_conclusion / battle_plan / intelligence.  AnalysisResult's helper
             # methods (get_sniper_points, get_core_conclusion, etc.) expect that inner
